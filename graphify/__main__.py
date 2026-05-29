@@ -728,40 +728,6 @@ def main() -> None:
         print("  hook install            install post-commit/post-checkout git hooks (all platforms)")
         print("  hook uninstall          remove git hooks")
         print("  hook status             check if git hooks are installed")
-        print("  gemini install          write GEMINI.md section + BeforeTool hook (Gemini CLI)")
-        print("  gemini uninstall        remove GEMINI.md section + BeforeTool hook")
-        print("  cursor install          write .cursor/rules/graphify.mdc (Cursor)")
-        print("  cursor uninstall        remove .cursor/rules/graphify.mdc")
-        print("  claude install          write graphify section to CLAUDE.md + PreToolUse hook (Claude Code)")
-        print("  claude uninstall        remove graphify section from CLAUDE.md + PreToolUse hook")
-        print("  codex install           write graphify section to AGENTS.md (Codex)")
-        print("  codex uninstall         remove graphify section from AGENTS.md")
-        print("  opencode install        write graphify section to AGENTS.md + tool.execute.before plugin (OpenCode)")
-        print("  opencode uninstall      remove graphify section from AGENTS.md + plugin")
-        print("  aider install           write graphify section to AGENTS.md (Aider)")
-        print("  aider uninstall         remove graphify section from AGENTS.md")
-        print("  copilot install         copy graphify skill to ~/.copilot/skills (GitHub Copilot CLI)")
-        print("  copilot uninstall       remove graphify skill from ~/.copilot/skills")
-        print("  vscode install          configure VS Code Copilot Chat (skill + .github/copilot-instructions.md)")
-        print("  vscode uninstall        remove VS Code Copilot Chat configuration")
-        print("  claw install            write graphify section to AGENTS.md (OpenClaw)")
-        print("  claw uninstall          remove graphify section from AGENTS.md")
-        print("  droid install           write graphify section to AGENTS.md (Factory Droid)")
-        print("  droid uninstall        remove graphify section from AGENTS.md")
-        print("  trae install            write graphify section to AGENTS.md (Trae)")
-        print("  trae uninstall         remove graphify section from AGENTS.md")
-        print("  trae-cn install         write graphify section to AGENTS.md (Trae CN)")
-        print("  trae-cn uninstall      remove graphify section from AGENTS.md")
-        print("  antigravity install     write .agents/rules + .agents/workflows + skill (Google Antigravity)")
-        print("  antigravity uninstall   remove .agents/rules, .agents/workflows, and skill")
-        print("  hermes install          write skill to ~/.hermes/skills/graphify/ (Hermes)")
-        print("  hermes uninstall        remove skill from ~/.hermes/skills/graphify/")
-        print("  kiro install            write skill to .kiro/skills/graphify/ + steering file (Kiro IDE/CLI)")
-        print("  kiro uninstall          remove skill + steering file")
-        print("  pi install              write skill to ~/.pi/agent/skills/graphify/ (Pi coding agent)")
-        print("  pi uninstall            remove skill from ~/.pi/agent/skills/graphify/")
-        print("  devin install           write skill to ~/.config/devin/skills/graphify/ (Devin CLI)")
-        print("  devin uninstall         remove skill from ~/.config/devin/skills/graphify/")
         print()
         return
 
@@ -779,7 +745,7 @@ def main() -> None:
 
     if cmd == "install":
         # Default to windows platform on Windows, claude elsewhere
-        default_platform = "windows" if platform.system() == "Windows" else "claude"
+        default_platform = "crush"
         selected_platform: str | None = None
         project_scope = False
         args = sys.argv[2:]
