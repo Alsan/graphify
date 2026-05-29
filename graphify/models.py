@@ -292,6 +292,7 @@ def _process_chunk(
     lock: threading.Lock,
 ) -> None:
     """Process a single chunk and store its result."""
+    print(f"  semantic: {file_type} chunk {chunk_index}: {', '.join(files)}", flush=True)
     result = call_model(files, file_type, deep_mode=deep_mode)
     with lock:
         results[chunk_index] = (chunk_index, result)

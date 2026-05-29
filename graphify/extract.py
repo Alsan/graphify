@@ -10174,6 +10174,8 @@ def _extract_parallel(
                         file=sys.stderr, flush=True,
                     )
                 done_count += 1
+                if total_files < _PROGRESS_INTERVAL:
+                    print(f"  extracting: {work_items[idx][1]}", flush=True)
                 if (
                     total_files >= _PROGRESS_INTERVAL
                     and done_count % _PROGRESS_INTERVAL == 0
@@ -10223,6 +10225,8 @@ def _extract_sequential(
                 f"  AST extraction: {work_idx}/{len(uncached_work)} uncached files ({work_idx * 100 // len(uncached_work)}%)",
                 flush=True,
             )
+        if total_files < _PROGRESS_INTERVAL:
+            print(f"  extracting: {path}", flush=True)
         extractor = _get_extractor(path)
         if extractor is None:
             per_file[idx] = {"nodes": [], "edges": []}

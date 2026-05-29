@@ -985,6 +985,7 @@ def extract_corpus_parallel(
         # Avoid thread pool overhead for single-worker runs (and keep
         # callback ordering identical to the pre-refactor sequential path).
         for idx, chunk in enumerate(chunks):
+            print(f"  semantic chunk {idx + 1}/{total}: {[str(f.relative_to(root)) for f in chunk]}", flush=True)
             _, result, exc = _run_one(idx, chunk)
             if exc is not None:
                 print(f"[graphify] chunk {idx + 1}/{total} failed: {exc}", file=sys.stderr)
@@ -996,6 +997,8 @@ def extract_corpus_parallel(
                 on_chunk_done(idx, total, result)
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
+            for idx, chunk in enumerate(chunks):
+                print(f"  semantic chunk {idx + 1}/{total}: {[str(f.relative_to(root)) for f in chunk]}", flush=True)
             futures = [pool.submit(_run_one, idx, chunk) for idx, chunk in enumerate(chunks)]
             for future in as_completed(futures):
                 idx, result, exc = future.result()
