@@ -1,5 +1,11 @@
 """graphify - extract · build · cluster · analyze · report."""
 
+try:
+    from importlib.metadata import version as _pkg_version
+    __version__ = _pkg_version("graphifyy")
+except Exception:
+    __version__ = "unknown"
+
 
 def __getattr__(name):
     # Lazy imports so `graphify install` works before heavy deps are in place.
