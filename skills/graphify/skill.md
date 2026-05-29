@@ -131,13 +131,12 @@ else:
 
 **Fast path:** If detection found zero docs, papers, and images (code-only corpus), skip Part B entirely and go straight to Part C. AST handles code - there is nothing for semantic subagents to do.
 
-**MANDATORY: You MUST use the Agent tool here. Reading files yourself one-by-one is forbidden - it is 5-10x slower. If you do not use the Agent tool you are doing this wrong.**
-
-Before dispatching subagents, print a timing estimate:
+Before dispatching subagents, read model routing env vars and print a timing estimate:
 - Load `total_words` and file counts from `.graphify_detect.json`
-- Estimate agents needed: `ceil(uncached_non_code_files / 22)` (chunk size is 20-25)
-- Estimate time: ~45s per agent batch (they run in parallel, so total ≈ 45s × ceil(agents/parallel_limit))
-- Print: "Semantic extraction: ~N files → X agents, estimated ~Ys"
+- Read per-resource-type model routing env vars (each optional): `GRAPHIFY_{TYPE}_PROVIDER`, `GRAPHIFY_{TYPE}_URL`, `GRAPHIFY_{TYPE}_MODEL` for CODE_SEMANTIC, DOC, IMAGE
+- Split uncached files by type, estimate chunks per type: `ceil(type_files / 22)`
+- Estimate time: ~45s per chunk (they run in parallel via threads, so total ≈ 45s × ceil(total_chunks / max_parallel))
+- Print: "Semantic extraction: N docs + M images + P papers → X chunks, estimated ~Ys"
 
 **Step B0 - Check extraction cache first**
 
@@ -163,108 +162,55 @@ print(f'Cache: {len(all_files)-len(uncached)} files hit, {len(uncached)} files n
 
 Only dispatch subagents for files listed in `.graphify_uncached.txt`. If all files are cached, skip to Part C directly.
 
-**Step B1 - Split into chunks**
+**Step B1 - Split into chunks by type**
 
-Load files from `.graphify_uncached.txt`. Split into chunks of 20-25 files each. Each image gets its own chunk (vision needs separate context).
+Load files from `.graphify_uncached.txt`. Split into **separate** chunk lists per file type (doc, paper, image). Code files are handled by AST — only their semantic pass goes through subagents (code files in uncached list). Each image gets its own chunk (vision needs separate context). Doc/paper chunks: 20-25 files each. Code semantic chunks: 20-25 files each.
 
-**Step B2 - Dispatch ALL subagents in a single message**
+Write four chunk files:
+- `.graphify_chunks_doc.json` — doc chunks (`.md .txt .rst`)
+- `.graphify_chunks_paper.json` — paper chunks (`.pdf`, or `.md/.txt` classified as paper)
+- `.graphify_chunks_image.json` — image chunks (one per image)
+- `.graphify_chunks_code.json` — code semantic chunks (for non-AST semantic pass)
 
-Call the Agent tool multiple times IN THE SAME RESPONSE - one call per chunk. This is the only way they run in parallel. If you make one Agent call, wait, then make another, you are doing it sequentially and defeating the purpose.
+**Step B2 - Process all chunks via models.py (parallel, per-type model routing)**
 
-Concrete example for 3 chunks:
-```
-[Agent tool call 1: files 1-15]
-[Agent tool call 2: files 16-30]  
-[Agent tool call 3: files 31-45]
-```
-All three in one message. Not three separate messages.
+Run a single Python call that reads the chunk files, calls the configured API endpoint per file type (respecting `GRAPHIFY_{TYPE}_PROVIDER`, `GRAPHIFY_{TYPE}_URL`, `GRAPHIFY_{TYPE}_MODEL` env vars), and writes `.graphify_semantic_new.json`:
 
-Each subagent receives this exact prompt (substitute FILE_LIST, CHUNK_NUM, TOTAL_CHUNKS, and DEEP_MODE):
-
-```
-You are a graphify extraction subagent. Read the files listed and extract a knowledge graph fragment.
-Output ONLY valid JSON matching the schema below - no explanation, no markdown fences, no preamble.
-
-Files (chunk CHUNK_NUM of TOTAL_CHUNKS):
-FILE_LIST
-
-Rules:
-- EXTRACTED: relationship explicit in source (import, call, citation, "see §3.2")
-- INFERRED: reasonable inference (shared data structure, implied dependency)
-- AMBIGUOUS: uncertain - flag for review, do not omit
-
-Code files: focus on semantic edges AST cannot find (call relationships, shared data, arch patterns).
-  Do not re-extract imports - AST already has those.
-Doc/paper files: extract named concepts, entities, citations.
-Image files: use vision to understand what the image IS - do not just OCR.
-  UI screenshot: layout patterns, design decisions, key elements, purpose.
-  Chart: metric, trend/insight, data source.
-  Tweet/post: claim as node, author, concepts mentioned.
-  Diagram: components and connections.
-  Research figure: what it demonstrates, method, result.
-  Handwritten/whiteboard: ideas and arrows, mark uncertain readings AMBIGUOUS.
-
-DEEP_MODE (if --mode deep was given): be aggressive with INFERRED edges - indirect deps,
-  shared assumptions, latent couplings. Mark uncertain ones AMBIGUOUS instead of omitting.
-
-Semantic similarity: if two concepts in this chunk solve the same problem or represent the same idea without any structural link (no import, no call, no citation), add a `semantically_similar_to` edge marked INFERRED with a confidence_score reflecting how similar they are (0.6-0.95). Examples:
-- Two functions that both validate user input but never call each other
-- A class in code and a concept in a paper that describe the same algorithm
-- Two error types that handle the same failure mode differently
-Only add these when the similarity is genuinely non-obvious and cross-cutting. Do not add them for trivially similar things.
-
-Hyperedges: if 3 or more nodes clearly participate together in a shared concept, flow, or pattern that is not captured by pairwise edges alone, add a hyperedge to a top-level `hyperedges` array. Examples:
-- All classes that implement a common protocol or interface
-- All functions in an authentication flow (even if they don't all call each other)
-- All concepts from a paper section that form one coherent idea
-Use sparingly — only when the group relationship adds information beyond the pairwise edges. Maximum 3 hyperedges per chunk.
-
-If a file has YAML frontmatter (--- ... ---), copy source_url, captured_at, author,
-  contributor onto every node from that file.
-
-confidence_score rules:
-- EXTRACTED edges: confidence_score must be 1.0
-- INFERRED edges: score 0.4-0.9 based on how certain you are.
-  Strong structural inference (e.g. two classes clearly share data): 0.8-0.9.
-  Reasonable but not certain: 0.6-0.7. Weak inference: 0.4-0.5.
-- AMBIGUOUS edges: score 0.1-0.3
-
-Output exactly this JSON (no other text):
-{"nodes":[{"id":"filestem_entityname","label":"Human Readable Name","file_type":"code|document|paper|image","source_file":"relative/path","source_location":null,"source_url":null,"captured_at":null,"author":null,"contributor":null}],"edges":[{"source":"node_id","target":"node_id","relation":"calls|implements|references|cites|conceptually_related_to|shares_data_with|semantically_similar_to","confidence":"EXTRACTED|INFERRED|AMBIGUOUS","confidence_score":1.0,"source_file":"relative/path","source_location":null,"weight":1.0}],"hyperedges":[{"id":"snake_case_id","label":"Human Readable Label","nodes":["node_id1","node_id2","node_id3"],"relation":"participate_in|implement|form","confidence":"EXTRACTED|INFERRED","confidence_score":0.75,"source_file":"relative/path"}],"input_tokens":0,"output_tokens":0}
+```bash
+python3 -m graphify.models DEEP_MODE_FLAG
 ```
 
-**Step B3 - Collect, cache, and merge**
+Replace `DEEP_MODE_FLAG` with `--deep` if `--mode deep` was given, else omit it.
 
-Wait for all subagents. For each result:
-- If a subagent returned valid JSON with `nodes` and `edges`, include it and save each file's nodes/edges to the cache
-- If a subagent failed or returned invalid JSON, print a warning and skip that chunk - do not abort
+This processes all chunks across all file types **in parallel using threads**, routing each chunk to its configured model endpoint. Each type uses its own system prompt (code/doc/paper/image). Results are deduplicated and written to `.graphify_semantic_new.json`.
 
-If more than half the chunks failed, stop and tell the user.
+If no chunks were found (no `.graphify_chunks_*.json` files), it prints a message and exits cleanly — proceed to Part C. If all chunks fail, `.graphify_semantic_new.json` will have empty nodes/edges — also proceed to Part C (AST results may still be valuable).
 
-Save new results to cache:
+**Important:** If you see "[graphify models] No model configured for 'X'" for a type you expected to process, set the corresponding `GRAPHIFY_X_URL` and `GRAPHIFY_X_MODEL` env vars. If you intentionally want to skip a type, ignore the message.
+
+**Step B3 - Cache new results and merge with cached**
+
+models.py already combined all chunk results into `.graphify_semantic_new.json`. Now save to cache and merge with previously cached results:
+
 ```bash
 python3 -c "
 import json
 from graphify.cache import save_semantic_cache
 from pathlib import Path
 
-new = json.loads(Path('.graphify_semantic_new.json').read_text()) if Path('.graphify_semantic_new.json').exists() else {'nodes':[],'edges':[]}
+new_path = Path('.graphify_semantic_new.json')
+new = json.loads(new_path.read_text()) if new_path.exists() else {'nodes':[],'edges':[]}
+
+# Save to per-file cache
 saved = save_semantic_cache(new.get('nodes', []), new.get('edges', []))
 print(f'Cached {saved} files')
-"
-```
 
-Merge cached + new results into `.graphify_semantic.json`:
-```bash
-python3 -c "
-import json
-from pathlib import Path
+# Merge with cached data for Part C
+cached_json = Path('.graphify_cached.json')
+cached = json.loads(cached_json.read_text()) if cached_json.exists() else {'nodes':[],'edges':[]}
+cached_nodes = cached.get('nodes', [])
 
-cached = json.loads(Path('.graphify_cached.json').read_text()) if Path('.graphify_cached.json').exists() else {'nodes':[],'edges':[]}
-new = json.loads(Path('.graphify_semantic_new.json').read_text()) if Path('.graphify_semantic_new.json').exists() else {'nodes':[],'edges':[]}
-
-all_nodes = cached['nodes'] + new.get('nodes', [])
-all_edges = cached['edges'] + new.get('edges', [])
+all_nodes = cached_nodes + new.get('nodes', [])
 seen = set()
 deduped = []
 for n in all_nodes:
@@ -274,15 +220,14 @@ for n in all_nodes:
 
 merged = {
     'nodes': deduped,
-    'edges': all_edges,
+    'edges': (cached.get('edges', []) + new.get('edges', [])),
     'input_tokens': new.get('input_tokens', 0),
     'output_tokens': new.get('output_tokens', 0),
 }
 Path('.graphify_semantic.json').write_text(json.dumps(merged, indent=2))
-print(f'Extraction complete - {len(deduped)} nodes, {len(all_edges)} edges ({len(cached[\"nodes\"])} from cache, {len(new.get(\"nodes\",[]))} new)')
+print(f'Complete - {len(deduped)} nodes, {len(merged[\"edges\"])} edges ({len(cached_nodes)} from cache, {len(new.get(\"nodes\",[]))} new)')
 "
 ```
-Clean up temp files: `rm -f .graphify_cached.json .graphify_uncached.txt .graphify_semantic_new.json`
 
 #### Part C - Merge AST + semantic into final extraction
 
